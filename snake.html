@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Snake Nodo Arquitectura</title>
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; font-family: Arial, sans-serif; overflow: hidden; }
+        #score-display { margin: 20px; display: flex; align-items: center; background: white; border-radius: 8px; padding: 5px 15px; font-weight: bold; color: #283593; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #score-display .value { color: white; background: #FF9800; border-radius: 12px; padding: 5px 18px; margin-left: 12px; }
+        
+        #game-container { position: relative; }
+        canvas { border: 2px solid #333; border-radius: 6px; display: block; }
+        
+        #restart-btn { 
+            position: absolute; 
+            top: 65%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            display: none; 
+            padding: 15px 30px; 
+            background: white; 
+            color: #FF9800; 
+            border: 2px solid #FF9800; 
+            border-radius: 15px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            z-index: 20; 
+        }
+        
+        #dpad { display: grid; grid-template-columns: repeat(3, 45px); gap: 5px; margin-top: 15px; }
+        .btn { width: 45px; height: 45px; border-radius: 8px; border: 1px solid #ccc; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .empty { visibility: hidden; }
+    </style>
+</head>
+<body>
+
+<div id="score-display">SCORE <span class="value" id="score-val">0</span></div>
+<div id="game-container">
+    <canvas id="canvas"></canvas>
+    <button id="restart-btn">REINICIAR</button>
+</div>
+<div id="dpad">
+    <div class="empty"></div><div class="btn" id="up">▲</div><div class="empty"></div>
+    <div class="btn" id="left">◀</div><div class="empty"></div><div class="btn" id="right">▶</div>
+    <div class="empty"></div><div class="btn" id="down">▼</div><div class="empty"></div>
+</div>
+
+<script>
+class Nodo {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.next = null; this.prev = null;
+    }
+}
+
+const Game = {
+    cell: 40, cols: 16, rows: 13, speed: 200,
+    head: null, tail: null, size: 0,
+    food: {}, dir: {x: 1, y: 0}, nextDir: {x: 1, y: 0},
+    over: false, images: {},
+
+    init() {
+        this.canvas = document.getElementById('canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.canvas.width = this.cols * this.cell;
+        this.canvas.height = this.rows * this.cell;
+        this.loadAssets(['bg', 'food', 'head'], { bg: 'BG.png', food: 'Food.png', head: 'Snake.png' }, () => this.reset());
+        this.bindEvents();
+    },
+
+    loadAssets(keys, sources, cb) {
+        let loaded = 0;
+        keys.forEach(k => {
+            this.images[k] = new Image();
+            this.images[k].src = sources[k];
+            this.images[k].onload = () => { if (++loaded === keys.length) cb(); };
+        });
+    },
+
+    reset() {
+        const midY = Math.floor(this.rows / 2);
+        this.head = new Nodo(6, midY);
+        let n1 = new Nodo(5, midY);
+        let n2 = new Nodo(4, midY);
+        this.head.next = n1; n1.prev = this.head;
+        n1.next = n2; n2.prev = n1;
+        this.tail = n2;
+        
+        this.size = 3; this.dir = {x: 1, y: 0}; this.nextDir = {x: 1, y: 0};
+        this.over = false; this.spawnFood(); this.updateUI();
+        if (this.loop) clearInterval(this.loop);
+        this.loop = setInterval(() => this.update(), this.speed);
+        document.getElementById('restart-btn').style.display = 'none';
+    },
+
+    spawnFood() {
+        if (this.size >= this.cols * this.rows) return this.end("¡VICTORIA!");
+        this.food = { x: Math.floor(Math.random() * this.cols), y: Math.floor(Math.random() * this.rows) };
+        if (this.checkSelfCollision(this.food.x, this.food.y)) this.spawnFood();
+    },
+
+    update() {
+        if (this.over) return;
+        this.dir = this.nextDir;
+        const nx = this.head.x + this.dir.x, ny = this.head.y + this.dir.y;
+
+        if (nx < 0 || nx >= this.cols || ny < 0 || ny >= this.rows || this.checkSelfCollision(nx, ny)) return this.end("GAME OVER");
+
+        const newHead = new Nodo(nx, ny);
+        newHead.next = this.head;
+        this.head.prev = newHead;
+        this.head = newHead;
+
+        if (nx === this.food.x && ny === this.food.y) {
+            this.size++; this.updateUI(); this.spawnFood();
+        } else {
+            this.tail = this.tail.prev;
+            this.tail.next = null;
+        }
+        this.draw();
+    },
+
+    checkSelfCollision(x, y) {
+        let curr = this.head;
+        while(curr) {
+            if (curr.x === x && curr.y === y) return true;
+            curr = curr.next;
+        }
+        return false;
+    },
+
+    draw() {
+        const { ctx, cell, images } = this;
+        ctx.drawImage(images.bg, 0, 0, this.canvas.width, this.canvas.height);
+        ctx.drawImage(images.food, this.food.x * cell, this.food.y * cell, cell, cell);
+
+        ctx.beginPath();
+        ctx.lineWidth = cell * 0.85; ctx.lineJoin = ctx.lineCap = 'round'; ctx.strokeStyle = '#2196F3';
+        let curr = this.head;
+        ctx.moveTo(curr.x * cell + cell/2, curr.y * cell + cell/2);
+        while(curr.next) {
+            curr = curr.next;
+            ctx.lineTo(curr.x * cell + cell/2, curr.y * cell + cell/2);
+        }
+        ctx.stroke();
+
+        const angle = this.dir.x === 1 ? 1.57 : this.dir.x === -1 ? -1.57 : this.dir.y === 1 ? 3.14 : 0;
+        ctx.save();
+        ctx.translate(this.head.x * cell + cell/2, this.head.y * cell + cell/2);
+        ctx.rotate(angle);
+        ctx.drawImage(images.head, -cell/2, -cell/2, cell, cell);
+        ctx.restore();
+    },
+
+    end(txt) {
+        this.over = true; clearInterval(this.loop);
+        
+        this.ctx.fillStyle = "rgba(0,0,0,0.6)";
+        this.ctx.fillRect(0,0,this.canvas.width, this.canvas.height);
+        
+        this.ctx.fillStyle = "white"; 
+        this.ctx.textAlign = "center";
+        this.ctx.font = "bold 40px Arial"; 
+        
+        this.ctx.fillText(txt, this.canvas.width/2, this.canvas.height * 0.45);
+        
+        document.getElementById('restart-btn').style.display = 'block';
+    },
+
+    setDir(nx, ny) {
+        if ((nx !== 0 && this.dir.x === 0) || (ny !== 0 && this.dir.y === 0)) this.nextDir = {x: nx, y: ny};
+    },
+
+    updateUI() { document.getElementById('score-val').textContent = this.size - 3; },
+
+    bindEvents() {
+        const keys = { ArrowUp: [0,-1], ArrowDown: [0,1], ArrowLeft: [-1,0], ArrowRight: [1,0] };
+        document.addEventListener('keydown', e => {
+            if (keys[e.key]) this.setDir(...keys[e.key]);
+            if (e.key.toLowerCase() === 'r' || e.key === 'Enter') this.reset();
+        });
+        const bindBtn = (id, dx, dy) => document.getElementById(id).onclick = () => this.setDir(dx, dy);
+        bindBtn('up', 0, -1); bindBtn('down', 0, 1); bindBtn('left', -1, 0); bindBtn('right', 1, 0);
+        document.getElementById('restart-btn').onclick = () => this.reset();
+    }
+};
+
+Game.init();
+</script>
+</body>
+</html>
